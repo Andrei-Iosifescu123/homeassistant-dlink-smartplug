@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # D-Link Smart Plug Home Assistant Integration
 
 [![GitHub release](https://img.shields.io/github/release/Andrei-Iosifescu123/homeassistant-dlink-smartplug.svg)](https://github.com/Andrei-Iosifescu123/homeassistant-dlink-smartplug/releases)
