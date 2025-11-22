@@ -1,4 +1,5 @@
 """Switch platform for D-Link Smart Plug."""
+import asyncio
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
@@ -59,11 +60,43 @@ class DLinkSmartPlugSwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the socket on."""
-        await self.coordinator.client.async_set_socket(self._socket_num, True)
+        # Send command and get response (which contains the new state)
+        response = await self.coordinator.client.async_set_socket(self._socket_num, True)
+        
+        # Update local state immediately from response if available
+        if response and isinstance(response, dict) and 'setting' in response:
+            try:
+                new_value = response['setting'][0]['metadata']['value']
+                new_state = new_value == 1
+                # Update coordinator data immediately with the actual device state
+                if self.coordinator.data and 'sockets' in self.coordinator.data:
+                    self.coordinator.data['sockets'][self._socket_num] = new_state
+                    # Notify listeners of the update
+                    self.coordinator.async_update_listeners()
+            except (KeyError, IndexError, TypeError):
+                pass
+        
+        # Also refresh to ensure we have the latest state
         await self.coordinator.async_request_refresh()
-
+    
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the socket off."""
-        await self.coordinator.client.async_set_socket(self._socket_num, False)
+        # Send command and get response (which contains the new state)
+        response = await self.coordinator.client.async_set_socket(self._socket_num, False)
+        
+        # Update local state immediately from response if available
+        if response and isinstance(response, dict) and 'setting' in response:
+            try:
+                new_value = response['setting'][0]['metadata']['value']
+                new_state = new_value == 1
+                # Update coordinator data immediately with the actual device state
+                if self.coordinator.data and 'sockets' in self.coordinator.data:
+                    self.coordinator.data['sockets'][self._socket_num] = new_state
+                    # Notify listeners of the update
+                    self.coordinator.async_update_listeners()
+            except (KeyError, IndexError, TypeError):
+                pass
+        
+        # Also refresh to ensure we have the latest state
         await self.coordinator.async_request_refresh()
 

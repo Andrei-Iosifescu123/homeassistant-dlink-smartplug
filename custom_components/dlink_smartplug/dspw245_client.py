@@ -18,6 +18,8 @@ class DLinkSmartPlugClient:
         self.model = model
         self._plug = None
         self._device_id = None
+        # Lock to prevent concurrent commands to the same socket
+        self._command_locks = {}  # socket_num -> asyncio.Lock
         
     def _get_plug(self):
         """Get or create the SmartPlug instance."""
@@ -64,17 +66,47 @@ class DLinkSmartPlugClient:
             return await loop.run_in_executor(None, plug.get_socket_states, socket)
     
     async def async_set_socket(self, socket: int, on: bool):
-        """Set socket state."""
-        await self.async_ensure_connected()
-        plug = self._get_plug()
-        loop = asyncio.get_event_loop()
-        try:
-            return await loop.run_in_executor(None, plug.set_socket, socket, on)
-        except Exception as e:
-            _LOGGER.warning("Error setting socket state, reconnecting: %s", e)
-            await self.async_reconnect()
-            # Retry once after reconnection
-            return await loop.run_in_executor(None, plug.set_socket, socket, on)
+        """Set socket state with locking to prevent concurrent commands.
+        
+        Returns:
+            dict: Response from device, or None on error
+            The response includes the new state in setting[0].metadata.value
+        """
+        # Get or create lock for this socket
+        if socket not in self._command_locks:
+            self._command_locks[socket] = asyncio.Lock()
+        
+        # Acquire lock to prevent concurrent commands to same socket
+        async with self._command_locks[socket]:
+            await self.async_ensure_connected()
+            plug = self._get_plug()
+            loop = asyncio.get_event_loop()
+            try:
+                # Send command and wait for completion
+                result = await loop.run_in_executor(None, plug.set_socket, socket, on)
+                
+                # Verify command succeeded (check response for error code)
+                if result and isinstance(result, dict):
+                    if result.get('code', 0) != 0:
+                        error_msg = result.get('message', 'Unknown error')
+                        raise Exception(f"Device returned error: {error_msg}")
+                    
+                    # Response contains the new state - we can use this!
+                    # result['setting'][0]['metadata']['value'] contains 1 (ON) or 0 (OFF)
+                    _LOGGER.debug("Command successful, new state: %s", 
+                                 result.get('setting', [{}])[0].get('metadata', {}).get('value'))
+                
+                return result
+            except Exception as e:
+                _LOGGER.warning("Error setting socket state, reconnecting: %s", e)
+                await self.async_reconnect()
+                # Retry once after reconnection
+                result = await loop.run_in_executor(None, plug.set_socket, socket, on)
+                if result and isinstance(result, dict):
+                    if result.get('code', 0) != 0:
+                        error_msg = result.get('message', 'Unknown error')
+                        raise Exception(f"Device returned error after reconnect: {error_msg}")
+                return result
     
     async def async_get_device_status(self):
         """Get device status."""
