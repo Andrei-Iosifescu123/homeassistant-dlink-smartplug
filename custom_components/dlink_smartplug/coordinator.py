@@ -37,16 +37,21 @@ class DLinkSmartPlugDataUpdateCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from the device."""
         try:
-            # Ensure connection
-            if not self.client._plug:
-                await self.client.async_connect()
-                await self.client.async_login()
+            # Ensure connection is alive (will reconnect if needed)
+            await self.client.async_ensure_connected()
             
             # Get socket states
             socket_states = await self.client.async_get_socket_states(socket=-1)
             
             # Send keep alive
-            await self.client.async_keep_alive()
+            try:
+                await self.client.async_keep_alive()
+            except Exception as e:
+                _LOGGER.debug("Keep alive failed, may need reconnection: %s", e)
+                # If keep alive fails, try to reconnect
+                await self.client.async_reconnect()
+                # Retry getting socket states after reconnection
+                socket_states = await self.client.async_get_socket_states(socket=-1)
             
             if socket_states is None:
                 raise UpdateFailed("Failed to get socket states")
@@ -56,6 +61,22 @@ class DLinkSmartPlugDataUpdateCoordinator(DataUpdateCoordinator):
                 "device_id": self.client.get_device_id(),
             }
         except Exception as err:
+            _LOGGER.warning("Error communicating with device: %s. Will retry on next update.", err)
+            # Don't raise UpdateFailed immediately - allow retry on next poll
+            # This prevents the integration from going unavailable
+            try:
+                # Try to reconnect
+                await self.client.async_reconnect()
+                # Retry once
+                socket_states = await self.client.async_get_socket_states(socket=-1)
+                if socket_states is not None:
+                    return {
+                        "sockets": socket_states,
+                        "device_id": self.client.get_device_id(),
+                    }
+            except Exception:
+                pass
+            # If retry also failed, raise UpdateFailed
             raise UpdateFailed(f"Error communicating with device: {err}") from err
     
     async def async_shutdown(self):

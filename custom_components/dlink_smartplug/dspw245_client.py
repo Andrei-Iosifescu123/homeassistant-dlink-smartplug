@@ -52,15 +52,29 @@ class DLinkSmartPlugClient:
     
     async def async_get_socket_states(self, socket: int = -1):
         """Get socket states."""
+        await self.async_ensure_connected()
         plug = self._get_plug()
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, plug.get_socket_states, socket)
+        try:
+            return await loop.run_in_executor(None, plug.get_socket_states, socket)
+        except Exception as e:
+            _LOGGER.warning("Error getting socket states, reconnecting: %s", e)
+            await self.async_reconnect()
+            # Retry once after reconnection
+            return await loop.run_in_executor(None, plug.get_socket_states, socket)
     
     async def async_set_socket(self, socket: int, on: bool):
         """Set socket state."""
+        await self.async_ensure_connected()
         plug = self._get_plug()
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, plug.set_socket, socket, on)
+        try:
+            return await loop.run_in_executor(None, plug.set_socket, socket, on)
+        except Exception as e:
+            _LOGGER.warning("Error setting socket state, reconnecting: %s", e)
+            await self.async_reconnect()
+            # Retry once after reconnection
+            return await loop.run_in_executor(None, plug.set_socket, socket, on)
     
     async def async_get_device_status(self):
         """Get device status."""
@@ -74,10 +88,56 @@ class DLinkSmartPlugClient:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, plug.keep_alive)
     
+    def _is_connection_alive(self) -> bool:
+        """Check if the connection is still alive."""
+        if not self._plug:
+            return False
+        if not hasattr(self._plug, 'socket'):
+            return False
+        if self._plug.socket is None:
+            return False
+        try:
+            # Check if socket is still connected by trying to get its fileno
+            # If socket is closed, this will raise an exception
+            self._plug.socket.fileno()
+            return True
+        except (OSError, AttributeError, ValueError):
+            return False
+    
+    async def async_ensure_connected(self):
+        """Ensure connection is alive, reconnect if needed."""
+        if not self._is_connection_alive():
+            _LOGGER.debug("Connection lost, reconnecting...")
+            await self.async_reconnect()
+        return self._plug
+    
+    async def async_reconnect(self):
+        """Reconnect to the device."""
+        _LOGGER.info("Reconnecting to device at %s", self.host)
+        # Close existing connection if any
+        if self._plug:
+            try:
+                await self.async_close()
+            except Exception:
+                pass
+        
+        # Reset plug to force new connection
+        self._plug = None
+        self._device_id = None
+        
+        # Create new connection
+        await self.async_connect()
+        await self.async_login()
+        _LOGGER.info("Successfully reconnected to device")
+    
     async def async_close(self):
         """Close the connection."""
         if self._plug:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self._plug.close)
-            self._plug = None
+            try:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, self._plug.close)
+            except Exception as e:
+                _LOGGER.debug("Error closing connection: %s", e)
+            finally:
+                self._plug = None
 

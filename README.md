@@ -91,8 +91,13 @@ You can control these switches from the Home Assistant UI, use them in automatio
 
 ## Credits
 
-- Based on the original [dspW245](https://github.com/jonassjoh/dspW245) library by jonassjoh
-- Inspired by the Node.js implementation by [Garfonso](https://github.com/Garfonso/dlinkWebSocketClient)
+This integration is based on and extends the work of:
+
+- **Original Library**: [dspW245](https://github.com/jonassjoh/dspW245) by [@jonassjoh](https://github.com/jonassjoh) (Jonas Johansson)
+- **Contributions**: [@afoteas](https://github.com/afoteas) for bug fixes and improvements
+- **Node.js Reference**: [dlinkWebSocketClient](https://github.com/Garfonso/dlinkWebSocketClient) by [@Garfonso](https://github.com/Garfonso)
+
+The Home Assistant integration was created by [@Andrei-Iosifescu123](https://github.com/Andrei-Iosifescu123).
 
 ## License
 
