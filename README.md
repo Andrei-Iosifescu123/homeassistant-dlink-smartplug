@@ -3,7 +3,7 @@
 [![GitHub release](https://img.shields.io/github/release/Andrei-Iosifescu123/homeassistant-dlink-smartplug.svg)](https://github.com/Andrei-Iosifescu123/homeassistant-dlink-smartplug/releases)
 [![License](https://img.shields.io/github/license/Andrei-Iosifescu123/homeassistant-dlink-smartplug.svg)](LICENSE)
 
-A Home Assistant custom integration for controlling D-Link DSP-W245 (4 sockets) and DSP-W115 (1 socket) smart plugs.
+A Home Assistant custom integration for local control of D-Link DSP-W245 (4 sockets) and DSP-W115 (1 socket) smart plugs.
 
 ## Features
 
@@ -105,3 +105,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## Support
 
 For issues and feature requests, please open an issue on [GitHub](https://github.com/Andrei-Iosifescu123/homeassistant-dlink-smartplug/issues).
+
