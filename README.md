@@ -110,19 +110,3 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## Support
 
 For issues and feature requests, please open an issue on [GitHub](https://github.com/Andrei-Iosifescu123/homeassistant-dlink-smartplug/issues).
-=======
-
-- Based on the original [dspW245](https://github.com/jonassjoh/dspW245) library by jonassjoh
-- Inspired by the Node.js implementation by [Garfonso](https://github.com/Garfonso/dlinkWebSocketClient)
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Support
-
-For issues and feature requests, please open an issue.
