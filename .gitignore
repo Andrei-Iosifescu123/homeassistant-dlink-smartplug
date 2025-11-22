@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Home Assistant
+.homeassistant/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+
+# Reference implementations (optional - remove if you want to include them)
+dlinkWebSocketClient-master/
+
+# Development files (optional - remove if you want to include them)
+plug_control.py
+HOME_ASSISTANT_SETUP.md
+QUICK_START.md
+PUBLISH_CHECKLIST.md
+manifest.json.template
+

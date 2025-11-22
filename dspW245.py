@@ -195,7 +195,53 @@ class SmartPlug:
     def connect(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(10)
-        self.socket = ssl.wrap_socket(sock)
+        # Create SSL context with older protocol support for compatibility with older devices
+        # The DSP-W245 uses older TLS/SSL protocols
+        try:
+            # Use PROTOCOL_TLS which allows negotiation of available protocols
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS)
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            # Lower security level to allow older ciphers and protocols
+            try:
+                context.set_ciphers('DEFAULT@SECLEVEL=1')
+            except:
+                pass
+            # Try to set minimum version to allow TLS 1.0
+            try:
+                # Python 3.7+ has TLSVersion enum
+                context.minimum_version = ssl.TLSVersion.MINIMUM_SUPPORTED
+            except AttributeError:
+                # Older Python versions don't have TLSVersion
+                pass
+            self.socket = context.wrap_socket(sock, server_hostname=None)
+        except Exception:
+            # Fallback: use deprecated wrap_socket with most permissive settings
+            try:
+                # Try PROTOCOL_TLS first (Python 3.6+)
+                self.socket = ssl.wrap_socket(
+                    sock,
+                    ssl_version=ssl.PROTOCOL_TLS,
+                    cert_reqs=ssl.CERT_NONE,
+                    do_handshake_on_connect=True,
+                    suppress_ragged_eofs=True
+                )
+            except:
+                # Last resort: try PROTOCOL_TLSv1 (may be deprecated but might work)
+                try:
+                    self.socket = ssl.wrap_socket(
+                        sock,
+                        ssl_version=ssl.PROTOCOL_TLSv1,
+                        cert_reqs=ssl.CERT_NONE,
+                        do_handshake_on_connect=True,
+                        suppress_ragged_eofs=True
+                    )
+                except:
+                    # If all else fails, use default but with no cert verification
+                    self.socket = ssl.wrap_socket(
+                        sock,
+                        cert_reqs=ssl.CERT_NONE
+                    )
         self.socket.connect((self.host, self.port))
 
     def send(self, data, log, raw=False):
@@ -267,7 +313,7 @@ class SmartPlug:
         data = {
         	"command": "device_status",
         }
-        self.send_json(data, log="Sending get device status")
+        return self.send_json(data, log="Sending get device status")
 
     def send_wlan_survey(self):
         data = {
@@ -296,7 +342,8 @@ class SmartPlug:
         self.send_json(data, log="Sending register")
 
     def set_socket(self, socket, on):
-        self.set_led(socket, on)
+        """Set socket state and return the response which may contain state info."""
+        return self.set_led(socket, on)
 
     def u_nr(self):
         return self.obj['device_id'][-4:]
@@ -312,6 +359,7 @@ class SmartPlug:
     def set_led(self, led, on):
         """
         On the DSP-W245 led can be 1,2,3,4.
+        Returns the response from the device, which may contain state information.
         """
         data = {
         	"command": "set_setting",
@@ -327,14 +375,64 @@ class SmartPlug:
                 }
             ]
         }
-        on = "ON" if on else "OFF"
-        self.send_json(data, log="Turning LED #{} {}".format(led, on))
+        on_str = "ON" if on else "OFF"
+        return self.send_json(data, log="Turning LED #{} {}".format(led, on_str))
 
     def send_get_setup_status(self):
         data = {
             "command": "get_setup_status",
         }
         self.send_json(data, log="Sending get setup status")
+
+    def get_socket_states(self, socket=-1):
+        """
+        Get the current state of socket(s).
+        Based on the Node.js implementation: https://github.com/Garfonso/dlinkWebSocketClient
+        
+        Args:
+            socket: Socket index (0-3 for W245, or -1 to get all sockets). Defaults to -1.
+        
+        Returns:
+            Dictionary with socket states {1: True/False, 2: True/False, ...} if socket=-1,
+            or boolean for specific socket, or None on error.
+        """
+        TYPE_SOCKET = 16  # Socket type constant from Node.js implementation
+        try:
+            # get_setting requires a setting array with type and idx in the request
+            data = {
+                "command": "get_setting",
+                "setting": [{
+                    "type": TYPE_SOCKET,
+                    "idx": socket
+                }]
+            }
+            response = self.send_json(data, log="Getting socket settings")
+            
+            if 'setting' not in response or len(response['setting']) == 0:
+                return None
+            
+            # Parse the response
+            setting = response['setting'][0]
+            
+            if socket >= 0:
+                # Single socket query - returns boolean
+                if 'metadata' in setting and 'value' in setting['metadata']:
+                    return setting['metadata']['value'] == 1
+            else:
+                # Query all sockets - returns array in metadata.value
+                socket_states = {}
+                if 'metadata' in setting and 'value' in setting['metadata']:
+                    # metadata.value is an array of {idx, metadata: {value}}
+                    for item in setting['metadata']['value']:
+                        if 'idx' in item and 'metadata' in item and 'value' in item['metadata']:
+                            socket_states[item['idx'] + 1] = item['metadata']['value'] == 1
+                    return socket_states if socket_states else None
+            
+            return None
+        except Exception as e:
+            if self.verbose > 0:
+                print(f"Could not get socket states: {e}")
+            return None
 
     def keep_alive(self):
         data = {

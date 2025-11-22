@@ -1,105 +1,107 @@
-# dspW245
+# D-Link Smart Plug Home Assistant Integration
 
-A Python3 library used to interface with the D-Link DSP-W245 and DSP-W115.
+[![GitHub release](https://img.shields.io/github/release/Andrei-Iosifescu123/homeassistant-dlink-smartplug.svg)](https://github.com/Andrei-Iosifescu123/homeassistant-dlink-smartplug/releases)
+[![License](https://img.shields.io/github/license/Andrei-Iosifescu123/homeassistant-dlink-smartplug.svg)](LICENSE)
 
-Please note that some errors might occur when interfacing with the W115 since 
-it seems to return different messages than the W245. To get around this you could
-remove lines 247 to 249 (including).
+A Home Assistant custom integration for controlling D-Link DSP-W245 (4 sockets) and DSP-W115 (1 socket) smart plugs.
 
-The library is somewhat lacking in terms of what it can do. It could be
-expanded to support more operations. It could also be refactored to look
-prettier. I might revisit this in the future, but for the time being it is
-at least capable of turning each socket on/off.
+## Features
 
-Any help will gladly be accepted. Don't hesitate to open an issue or submitting
-a pull request.
+- ✅ **Full socket control** - Control each socket individually (4 sockets for W245, 1 for W115)
+- ✅ **Real-time state updates** - Automatically queries and updates socket states
+- ✅ **Configurable polling** - Adjustable update interval (1-300 seconds, default: 5s)
+- ✅ **UI-based setup** - Easy configuration through Home Assistant UI (no YAML editing)
+- ✅ **Persistent connection** - Maintains WebSocket connection with keep-alive
+- ✅ **Secure communication** - SSL/TLS encrypted communication
+- ✅ **Auto-reconnection** - Handles connection drops gracefully
 
-## Disclaimer
+## Supported Devices
 
-As long as the library is only used for turning the sockets on or off, the
-library should be safe to use. Although it also supports other functions such
-as changing the firmware of the device. These functions can brick your device,
-use them at your own risk.
+- **D-Link DSP-W245** - 4 individually controllable sockets
+- **D-Link DSP-W115** - 1 controllable socket
+
+## Installation
+
+### HACS (Recommended)
+
+1. Open HACS in Home Assistant
+2. Go to Integrations
+3. Click the three dots (⋮) → Custom repositories
+4. Add repository: `https://github.com/Andrei-Iosifescu123/homeassistant-dlink-smartplug`
+5. Category: Integration
+6. Click Install
+7. Restart Home Assistant
+
+### Manual Installation
+
+1. Copy the `custom_components/dlink_smartplug` folder to your Home Assistant `custom_components` directory
+2. Restart Home Assistant
+3. Go to **Settings** → **Devices & Services** → **Add Integration**
+4. Search for "D-Link Smart Plug" and follow the setup wizard
+
+## Configuration
+
+The integration uses a config flow, so you can set it up through the UI:
+
+1. Go to **Settings** → **Devices & Services**
+2. Click **"+ ADD INTEGRATION"**
+3. Search for **"D-Link Smart Plug"**
+4. Enter:
+   - **IP Address or Hostname**: The IP address of your smart plug (e.g., `192.168.0.20`)
+   - **PIN Code**: The 6-digit PIN code from the back of the device
+   - **Device Name**: A friendly name for your device (optional)
+   - **Device Model**: Select W245 or W115 (defaults to W245)
+   - **Update Interval**: How often to poll for state updates (default: 5 seconds)
+
+## Requirements
+
+- Home Assistant 2023.1 or later
+- The device must be on the same network as Home Assistant
+- The device should **not** be paired with the mydlink app (use PIN code)
+- Python 3.8 or higher
 
 ## Usage
 
-The easiest way to use this library is to use the PIN code of the device as
-authentication. This requires the device to not be paired with the mydlink app.
-The easiest way to have the device connected to the correct network and not
-remain paired with the app is to follow the steps below.
+After installation, you'll have switch entities for each socket:
 
-1. If needed. Remove the device from mydlink.
-2. Start the setup process of pairing the device with mydlink.
-3. Abort the setup process once the device is connected to the desired network.
+- `switch.dlink_smart_plug_socket_1`
+- `switch.dlink_smart_plug_socket_2`
+- `switch.dlink_smart_plug_socket_3`
+- `switch.dlink_smart_plug_socket_4` (W245 only)
 
-The device can then be interfaced with using the code below.
+You can control these switches from the Home Assistant UI, use them in automations, or control them via the API.
 
-```
-#!python3
-from dspW245 import SmartPlug
+## Troubleshooting
 
-# The latter part is the PIN code.
-sp = SmartPlug("192.168.0.20", "000000")
+### Integration doesn't appear
+- Check that all files are in `custom_components/dlink_smartplug/`
+- Restart Home Assistant completely
+- Check Home Assistant logs for errors
 
-# Turn socket [1,2,3,4] on or off.
-sp.set_socket(1, on=True)
-sp.set_socket(4, on=False)
+### "Cannot connect" error
+- Verify the IP address is correct (ping the device)
+- Check the PIN code is correct (6 digits)
+- Ensure device is powered on and connected to WiFi
+- Make sure device is **not** paired with the mydlink app
 
-# Upgrades the firmare to the firmware found at the provided url.
-sp.upgrade_fw("http://example.com/somefirmware")
+### Socket states not updating
+- Check Home Assistant logs for errors
+- Verify network connectivity
+- Try increasing the update interval if network is slow
 
-# Used to avoid the connection from timing out.
-sp.keep_alive()
+## Credits
 
-# Close the connection.
-sp.close()
-```
+- Based on the original [dspW245](https://github.com/jonassjoh/dspW245) library by jonassjoh
+- Inspired by the Node.js implementation by [Garfonso](https://github.com/Garfonso/dlinkWebSocketClient)
 
-If the device is paired with the mydlink app, you need to use the device token
-instead of the PIN. This token can be a bit tricky to get but can be obtained
-through the following steps.
+## License
 
-1. Set the device to factory mode. This is done using the below steps. It's
-possible that this step requires the device to be removed from mydlink.
-    1. Reset the device into recovery mode by holding the reset button during
-  boot. If done correctly, a telnet server should be running on the device.
-    2. Connect to the WiFi of the device and open a terminal.
-    3. Run `telnet 192.168.0.20` (default credentials are `admin:123456`).
-    4. Run `nvram_set FactoryMode 1`.
-    5. Run `reboot; exit;`
-2. If needed. Setup the device with mydlink like normal again.
-3. Run `telnet 192.168.0.20` when connected to the same network as the device.
-4. Run `cat /mydlink/config/device.cfg`. Copy the value for `DeviceToken`. The config file may also be present at `/mnt/user`.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-You can then control the device using the token instead.
+## Contributing
 
-```
-sp = SmartPlug(IP, "00A00A000000-511ea125-250b-0dc1-40f0-c6570ebc51a2")
-```
-
-Note that for the W115 it would seem that the token will reset from time to time.
-
-While the library has only been tested on the W245, it's possible that it will
-still work with other similar models like the W115. If another model than the
-W245 is used, the model can be specified as below:
-
-```
-sp = SmartPlug("192.168.0.20", "000000", model="W115")
-```
-
-If the library is compatible with other models, let me know and I'll add the
-information here.
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Support
 
-Works with the DSP-W245 on firmware versions:
-
-* `1.00 (3.0.0-b45)`
-* `1.01 (3.3.0-b03)`
-
-Works with the DSP-W115 although this potentially requires the removal of lines 247 to 249 (included) (thanks Garfonso).
-
-## Other
-
-A node.js version by @Garfonso can be found be found here: 
-https://github.com/Garfonso/dlinkWebSocketClient
+For issues and feature requests, please open an issue on [GitHub](https://github.com/Andrei-Iosifescu123/homeassistant-dlink-smartplug/issues).
