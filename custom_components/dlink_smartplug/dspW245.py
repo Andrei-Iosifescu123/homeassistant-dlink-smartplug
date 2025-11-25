@@ -46,8 +46,7 @@ class HybiParser:
         rsv3 = (data & RSV3) == RSV3
 
         if rsv1 or rsv2 or rsv3:
-            print("RSV not zero")
-            exit()
+            raise ValueError("WebSocket RSV bits not zero - invalid frame")
 
         self.final = (data & FIN) == FIN
         self.opcode = (data & OPCODE)
@@ -55,12 +54,10 @@ class HybiParser:
         self.payload = []
 
         if self.opcode not in OPCODES:
-            print("Bad opcode")
-            exit()
+            raise ValueError(f"WebSocket bad opcode: {self.opcode}")
 
         if self.opcode not in FRAGMENTED_OPCODES and not self.final:
-            print("Excepted non-final packet")
-            exit()
+            raise ValueError("WebSocket non-final packet for non-fragmentable opcode")
 
     def parseLength(self, data):
         self.masked = (data & MASK) == MASK
@@ -74,8 +71,7 @@ class HybiParser:
 
     def byteArrayToLong(self, b, offset, l):
         if len(b) < l:
-            print("l must be less than len(b)")
-            exit()
+            raise ValueError(f"WebSocket buffer too short: need {l} bytes, got {len(b)}")
         value = 0
         for i in range(l):
             shift = (l - 1 - i) * 8
@@ -85,8 +81,7 @@ class HybiParser:
     def getInteger(self, b):
         i = self.byteArrayToLong(b, 0, len(b))
         if i < 0 or i > 2000000000:
-            print("Bad integer")
-            exit()
+            raise ValueError(f"WebSocket bad integer value: {i}")
         return i
 
     def parseExtendedLength(self, buf):
@@ -188,6 +183,7 @@ class SmartPlug:
         self.obj = {}
         self.verbose = verbose
         self.parser = HybiParser()
+        self._last_get_setting_response = None  # Store last response for debugging
         self.connect()
         self.send_upgrade()
         self.send_login()
@@ -260,6 +256,70 @@ class SmartPlug:
             r = [d for d in self.socket.recv(n)]
             return r[0] if n == 1 else r
         return self.socket.recv(1024) if raw else self.parser.decode(_recv)
+    
+    def recv_until_command(self, expected_command, max_attempts=10):
+        """
+        Read messages from socket until we get one with the expected command.
+        This handles cases where keep_alive or other responses arrive first.
+        
+        Args:
+            expected_command: The command name we're expecting in the response
+            max_attempts: Maximum number of messages to read before giving up
+            
+        Returns:
+            The JSON response with the expected command, or None if not found
+        """
+        import json
+        import socket as socket_module
+        
+        # Save original timeout
+        try:
+            original_timeout = self.socket.gettimeout()
+        except:
+            original_timeout = 10
+        
+        try:
+            for _ in range(max_attempts):
+                try:
+                    # Set a short timeout to avoid blocking indefinitely
+                    self.socket.settimeout(1.0)
+                    raw_response = self.recv(raw=False)
+                    
+                    if raw_response:
+                        try:
+                            response = json.loads(raw_response)
+                            if response.get('command') == expected_command:
+                                return response
+                            # If it's a keep_alive, log it and continue reading
+                            elif response.get('command') == 'keep_alive':
+                                if self.verbose > 1:
+                                    print(f"Received keep_alive response, continuing to read for {expected_command}")
+                                continue
+                            # For other unexpected commands, log and continue
+                            elif self.verbose > 1:
+                                print(f"Received unexpected command '{response.get('command')}', continuing to read for {expected_command}")
+                                continue
+                        except json.JSONDecodeError:
+                            if self.verbose > 0:
+                                print(f"Failed to parse response as JSON: {raw_response}")
+                            continue
+                except socket_module.timeout:
+                    # Timeout is expected if no message is available
+                    if self.verbose > 1:
+                        print(f"Timeout waiting for {expected_command} response, retrying...")
+                    continue
+                except Exception as e:
+                    if self.verbose > 0:
+                        print(f"Error reading response: {e}")
+                    break
+        finally:
+            # Always restore original timeout
+            try:
+                self.socket.settimeout(original_timeout)
+            except:
+                pass
+        
+        return None
 
     def close(self):
         self.socket.close()
@@ -271,7 +331,20 @@ class SmartPlug:
         data = bytes(data)
         return data
 
-    def send_json(self, data, log):
+    def send_json(self, data, log, match_response_command=False):
+        """
+        Send a JSON command and receive the response.
+        
+        Args:
+            data: The command data dictionary
+            log: Log message for the command
+            match_response_command: If True, read messages until we get one matching
+                                   the sent command. Useful when keep_alive responses
+                                   might arrive first.
+        """
+        import json
+        expected_command = data.get('command') if match_response_command else None
+        
         d = {
             "sequence_id": 1001, # Does not matter.
         	"local_cid": 41566, # Does not matter.
@@ -288,11 +361,31 @@ class SmartPlug:
         data = json.dumps(data)
         data = self.parser.encode(data)
         data = self.bytes(data)
-        r = self.send(data, log)
-        r = json.loads(r)
+        
+        if self.verbose > 0:
+            print(log)
+        self.socket.send(data)
+        
+        # Read response, matching command if requested
+        if match_response_command and expected_command:
+            r = self.recv_until_command(expected_command)
+            if r is None:
+                # Fallback to regular recv if matching failed
+                r = self.recv(raw=False)
+                r = json.loads(r)
+            # Note: recv_until_command already returns a parsed dict, no need to json.loads
+        else:
+            r = self.recv(raw=False)
+            r = json.loads(r)
+        
+        if self.verbose > 1:
+            print("Recieved:")
+            print(json.dumps(r, indent=2))
+            print()
+        
         if 'code' in r and r['code'] != 0:
-            print("Error ({}): {}".format(r['code'], r['message']))
-            exit()
+            error_msg = r.get('message', 'Unknown error')
+            raise Exception(f"Device returned error code {r['code']}: {error_msg}")
         return r
 
     def send_login(self):
@@ -406,9 +499,23 @@ class SmartPlug:
                     "idx": socket
                 }]
             }
-            response = self.send_json(data, log="Getting socket settings")
+            # Use match_response_command=True to ensure we get the get_setting response
+            # even if keep_alive responses arrive first
+            response = self.send_json(data, log="Getting socket settings", match_response_command=True)
+            # Store last response for debugging
+            self._last_get_setting_response = response
             
-            if 'setting' not in response or len(response['setting']) == 0:
+            # Log response for debugging if it's invalid
+            if 'setting' not in response:
+                if self.verbose > 0:
+                    import json
+                    print(f"Invalid response - missing 'setting' field: {json.dumps(response, indent=2)}")
+                return None
+            
+            if len(response['setting']) == 0:
+                if self.verbose > 0:
+                    import json
+                    print(f"Invalid response - empty 'setting' array: {json.dumps(response, indent=2)}")
                 return None
             
             # Parse the response
@@ -418,20 +525,103 @@ class SmartPlug:
                 # Single socket query - returns boolean
                 if 'metadata' in setting and 'value' in setting['metadata']:
                     return setting['metadata']['value'] == 1
+                else:
+                    if self.verbose > 0:
+                        import json
+                        print(f"Invalid response - missing metadata/value in setting: {json.dumps(response, indent=2)}")
+                    return None
             else:
                 # Query all sockets - returns array in metadata.value
                 socket_states = {}
                 if 'metadata' in setting and 'value' in setting['metadata']:
+                    value_data = setting['metadata']['value']
+                    # Check if value is actually a list/array
+                    if not isinstance(value_data, list):
+                        # Always log this error for debugging
+                        import json
+                        error_msg = f"Invalid response - metadata.value is not a list: {type(value_data)}, value: {value_data}"
+                        if self.verbose > 0:
+                            print(error_msg)
+                            print(f"Full response: {json.dumps(response, indent=2)}")
+                        # Store error in response for HA logging
+                        self._last_get_setting_response = response
+                        return None
+                    
                     # metadata.value is an array of {idx, metadata: {value}}
-                    for item in setting['metadata']['value']:
-                        if 'idx' in item and 'metadata' in item and 'value' in item['metadata']:
-                            socket_states[item['idx'] + 1] = item['metadata']['value'] == 1
-                    return socket_states if socket_states else None
-            
-            return None
+                    parsed_count = 0
+                    for item in value_data:
+                        if not isinstance(item, dict):
+                            # Only log on error
+                            import json
+                            if self.verbose > 0:
+                                print(f"Invalid response - item in metadata.value is not a dict: {type(item)}, value: {item}")
+                            continue
+                        
+                        if 'idx' in item and 'metadata' in item and isinstance(item['metadata'], dict) and 'value' in item['metadata']:
+                            try:
+                                socket_num = int(item['idx']) + 1  # Convert 0-based to 1-based
+                                socket_value = int(item['metadata']['value'])
+                                socket_states[socket_num] = (socket_value == 1)
+                                parsed_count += 1
+                            except (ValueError, TypeError, KeyError) as e:
+                                # Only log on error
+                                import json
+                                if self.verbose > 0:
+                                    print(f"Error parsing socket item: {e}, item: {json.dumps(item, indent=2)}")
+                                continue
+                        else:
+                            # Only log on error - store which check failed for debugging
+                            missing = []
+                            if 'idx' not in item:
+                                missing.append("idx")
+                            if 'metadata' not in item:
+                                missing.append("metadata")
+                            elif not isinstance(item.get('metadata'), dict):
+                                missing.append("metadata (not a dict)")
+                            elif 'value' not in item.get('metadata', {}):
+                                missing.append("metadata.value")
+                            
+                            # Only log on error
+                            import json
+                            if self.verbose > 0:
+                                print(f"Invalid response - item missing required fields: {missing}, item: {json.dumps(item, indent=2)}")
+                    
+                    if socket_states:
+                        return socket_states
+                    else:
+                        # Always log this error for debugging
+                        import json
+                        error_msg = f"Invalid response - no valid socket states parsed (parsed {parsed_count} items from {len(value_data)} total)"
+                        if self.verbose > 0:
+                            print(error_msg)
+                            print(f"Full response: {json.dumps(response, indent=2)}")
+                            print(f"value_data: {value_data}")
+                            print(f"socket_states dict: {socket_states}")
+                        # Store error in response for HA logging
+                        self._last_get_setting_response = response
+                        return None
+                else:
+                    # Always log this error for debugging
+                    import json
+                    error_msg = "Invalid response - missing metadata/value for all sockets"
+                    if self.verbose > 0:
+                        print(error_msg)
+                        print(f"Full response: {json.dumps(response, indent=2)}")
+                    # Store error in response for HA logging
+                    self._last_get_setting_response = response
+                    return None
         except Exception as e:
+            import traceback
+            import json
+            error_msg = f"Exception in get_socket_states: {e}"
             if self.verbose > 0:
-                print(f"Could not get socket states: {e}")
+                print(error_msg)
+                print(f"Traceback: {traceback.format_exc()}")
+            # Store error in response for HA logging
+            try:
+                self._last_get_setting_response = response
+            except:
+                pass
             return None
 
     def keep_alive(self):

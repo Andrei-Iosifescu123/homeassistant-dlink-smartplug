@@ -52,11 +52,35 @@ class DLinkSmartPlugSwitch(CoordinatorEntity, SwitchEntity):
         self._attr_unique_id = f"{coordinator.entry.entry_id}_socket_{socket_num}"
 
     @property
-    def is_on(self) -> bool:
-        """Return true if the switch is on."""
-        if self.coordinator.data and "sockets" in self.coordinator.data:
-            return self.coordinator.data["sockets"].get(self._socket_num, False)
-        return False
+    def available(self) -> bool:
+        """Return if entity is available."""
+        # Entity is available unless coordinator has no data (connection failed)
+        # Even if state is unknown (None response), entity stays available
+        return self.coordinator.data is not None
+    
+    @property
+    def is_on(self) -> bool | None:
+        """Return true if the switch is on, None if state is unknown."""
+        if not self.coordinator.data:
+            return None  # No data = unknown
+        
+        if "sockets" not in self.coordinator.data:
+            return None  # No socket data = unknown
+        
+        # Check if state is marked as unknown (invalid response format)
+        if self.coordinator.data.get("unknown", False):
+            # For unknown state, return last known state if we have it
+            # This keeps entity available but shows last known state
+            sockets = self.coordinator.data.get("sockets", {})
+            if self._socket_num in sockets:
+                # Return last known state (entity stays available, shows last state)
+                return sockets[self._socket_num]
+            # No last known state - return None (will show as unavailable in UI)
+            # But entity itself is still available
+            return None
+        
+        # Normal case: return the socket state
+        return self.coordinator.data["sockets"].get(self._socket_num, False)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the socket on."""

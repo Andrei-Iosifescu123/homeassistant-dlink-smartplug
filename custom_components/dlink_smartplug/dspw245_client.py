@@ -58,12 +58,43 @@ class DLinkSmartPlugClient:
         plug = self._get_plug()
         loop = asyncio.get_event_loop()
         try:
-            return await loop.run_in_executor(None, plug.get_socket_states, socket)
+            result = await loop.run_in_executor(None, plug.get_socket_states, socket)
+            if result is None:
+                # Log the actual response that was received
+                import json
+                last_response = getattr(plug, '_last_get_setting_response', None)
+                if last_response:
+                    _LOGGER.warning(
+                        "get_socket_states returned None. "
+                        "Device response was: %s",
+                        json.dumps(last_response, indent=2)
+                    )
+                else:
+                    _LOGGER.warning(
+                        "get_socket_states returned None. "
+                        "No response stored for debugging."
+                    )
+            return result
         except Exception as e:
             _LOGGER.warning("Error getting socket states, reconnecting: %s", e)
             await self.async_reconnect()
             # Retry once after reconnection
-            return await loop.run_in_executor(None, plug.get_socket_states, socket)
+            result = await loop.run_in_executor(None, plug.get_socket_states, socket)
+            if result is None:
+                import json
+                last_response = getattr(plug, '_last_get_setting_response', None)
+                if last_response:
+                    _LOGGER.warning(
+                        "get_socket_states returned None after reconnection. "
+                        "Device response was: %s",
+                        json.dumps(last_response, indent=2)
+                    )
+                else:
+                    _LOGGER.warning(
+                        "get_socket_states returned None after reconnection. "
+                        "Device may be returning invalid response format."
+                    )
+            return result
     
     async def async_set_socket(self, socket: int, on: bool):
         """Set socket state with locking to prevent concurrent commands.
